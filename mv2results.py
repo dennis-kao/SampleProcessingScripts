@@ -74,7 +74,10 @@ def safe_rm(path):
 			if os.path.islink(dir_path):
 				symlinks.append(dir_path)
 
+	print('Delete these input files: ')
+
 	for link in symlinks:
+		print(os.path.abspath(link))
 		os.unlink(link)
 
 	shutil.rmtree(path)
