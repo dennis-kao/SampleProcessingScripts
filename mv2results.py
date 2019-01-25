@@ -96,14 +96,13 @@ def safe_rm(path):
 		print(link)
 
 def print_excel_values(path):
-	
-	results_x_dir = os.path.dirname(path)
+		
 	bams = list_files(path, ".bam")
 
 	print('Enter these values in to the Excel sheet:')
 
 	for bam in bams:
-		print(results_x_dir)
+		print(path)
 	
 	for bam in bams:
 		full_bam_path = os.path.join(path, bam)
