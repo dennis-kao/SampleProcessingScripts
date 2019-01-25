@@ -10,13 +10,14 @@
 
 #Key features:
 #	1. Circumvent issue of not being able to move directories from a personal largeprojects directory to dccforge storage by copying them
-#	2. Determines storage destination path from project id (folder name)
+#	2. Determines results destination path from project id (folder name)
 #	2. Copying over old vcfs from an old bcbio run if there is a folder in the old project named old_vcfs 
 #	3. Setting appropriate permissions across all moved files
 #	4. Prints path of input files to be deleted, path of moved bams and path of project directory
 #	5. Moves old bcbio run in to the appropriate monthly trash directory
+#	6. Copies over old reports from older bcbio runs
 
-#Shell requirements:
+#System/Shell requirements:
 #	df -b
 #	chmod g+w -R
 
@@ -42,6 +43,9 @@ def list_files(path, extension=""):
 		return files
 
 def trash(project_dir):
+
+	#Moves a bcbio run to the appropriate "monthly" trash
+
 	trash_path = "/hpf/largeprojects/ccm_dccforge/dccforge/trash/"
 	monthly_trash = os.path.join(trash_path, datetime.now().strftime("%Y-%m"))
 	proj = os.path.basename(project_dir)
@@ -59,20 +63,25 @@ def trash(project_dir):
 
 def safe_rm(path):
 	
-	# Deletes contents of a directory in a safe manner -- the source of symlinks are not recursively removed
+	# Deletes a directory such that the source of symlinks are not recursively removed
 
-	symlinks = []
+	def find_symlinks(path):
+		symlinks = []
 
-	for dirpath, dirnames, filenames in os.walk(path):
-		for name in filenames:
-			file_path = os.path.join(dirpath, name)
-			if os.path.islink(file_path):
-				symlinks.append(file_path)
+		for dirpath, dirnames, filenames in os.walk(path):
+			for name in filenames:
+				file_path = os.path.join(dirpath, name)
+				if os.path.islink(file_path):
+					symlinks.append(file_path)
 
-		for name in dirnames:
-			dir_path = os.path.join(dirpath, name)
-			if os.path.islink(dir_path):
-				symlinks.append(dir_path)
+			for name in dirnames:
+				dir_path = os.path.join(dirpath, name)
+				if os.path.islink(dir_path):
+					symlinks.append(dir_path)
+
+		return symlinks
+
+	symlinks = find_symlinks(path)
 
 	print('Delete these input files: ')
 
@@ -97,7 +106,8 @@ def print_excel_values(path):
 		print(results_x_dir)
 	
 	for bam in bams:
-		print(bam)
+		full_bam_path = os.path.join(path, bam)
+		print(full_bam_path)
 
 def move(src, dest, proj):
 
@@ -133,7 +143,12 @@ def move(src, dest, proj):
 
 	print("Successfully moved Project %s from %s to %s" % (proj, src, dest_dir))
 
-def check_and_move(src):
+def check_and_move(src, skip_sample_check=False):
+
+	#Checks for sufficient space, old bcbio runs
+	#If there is an old bcbio run, check that the samples are a subset of the new bcbio run before moving
+	#If there is an old bcbio run, copy over reports and the old_vcfs folder is there is one
+
 	def determine_dest_parent_path(src):
 		results_path = "/hpf/largeprojects/ccm_dccforge/dccforge/results/"
 		proj = os.path.basename(real_src)
@@ -174,29 +189,35 @@ def check_and_move(src):
 		src_vcfs = list_files(real_src, ".vcf")
 		src_bams = list_files(real_src, ".bam")
 
-		if src_bams.issuperset(dest_bams) and src_vcfs.issuperset(dest_vcfs):
-			print("src vcf\'s and bam\'s are a superset of the existing project\'s. Storing the old project\'s reports in the main project directory")
+		src_is_superset = src_bams.issuperset(dest_bams) and src_vcfs.issuperset(dest_vcfs)
 
-			dest_old_vcfs_path = os.path.join(dest_dir, "old_vcfs")
+		if skip_sample_check or src_is_superset:
 
-			if os.path.exists(dest_old_vcfs_path):
+			if src_is_superset:
+				print("src vcf\'s and bam\'s are a superset of the existing project\'s. Attempting to store the old project's old_vcfs folder and reports.")
+			else:
+				print('--skip_sample_check parameter applied and src vcf\'s and bam\'s are NOT a superset of the existing project\'s. I hope you know what you are doing!')
+
+			old_vcfs = os.path.join(dest_dir, "old_vcfs")
+			old_reports = list_files(dest_dir, ".csv")
+			new_reports = list_files(real_src, ".csv")
+
+			if os.path.exists(old_vcfs):
 				print('Detected an old_vcfs folder in the previous bcbio run. Copying folder to new project.')
 				src_old_vcfs_path = os.path.join(real_src, "old_vcfs")
 				if not os.path.exists(src_old_vcfs_path):
-					shutil.copytree(dest_old_vcfs_path, src_old_vcfs_path)
+					shutil.copytree(old_vcfs, src_old_vcfs_path)
 				else:
-					print('There is already an old_vcfs folder in the source directory. Please manually copy over the report files and re-run the script.')
+					print('There is already an old_vcfs folder in the source directory. Please manually copy over the vcf files and re-run the script.')
 					exit(6)
 
-			old_reports = [csv for csv in list_files(dest_dir, ".csv") \
-			if "create_report" not in csv \
-			and "merge_report" not in csv \
-			and csv != "data_versions.csv" \
-			and csv != "metadata.csv"]
-
 			for f in old_reports:
-				report_path = os.path.join(dest_dir, f)
-				shutil.copy2(report_path, real_src)
+				if f not in new_reports:
+					print('Copying over old report %s to src' % f)
+					report_path = os.path.join(dest_dir, f)
+					shutil.copy2(report_path, real_src)
+				else:
+					print('Detected a report in the old run with the same name as a report in the new run: %s. Not copying this over.' % f)
 
 			trash(dest_dir)
 
@@ -216,7 +237,7 @@ def check_and_move(src):
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser(description='Moves a cre/crg/crt-bcbio run to the HPC results directory')
 	parser.add_argument('-src', help='Source directory containing files from a finished bcbio run')
+	parser.add_argument('--skip_sample_check', action='store_true', help='Override checks for an older bcbio run')
 	args = parser.parse_args()
 	
-	check_and_move(args.src)
-
+	check_and_move(args.src, args.skip_sample_check)
