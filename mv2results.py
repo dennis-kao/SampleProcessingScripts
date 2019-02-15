@@ -96,7 +96,7 @@ def safe_rm(path):
 		print(link)
 
 def print_excel_values(path):
-		
+
 	bams = list_files(path, ".bam")
 
 	print('Enter these values in to the Excel sheet:')
@@ -142,21 +142,20 @@ def move(src, dest, proj):
 
 	print("Successfully moved Project %s from %s to %s" % (proj, src, dest_dir))
 
-def check_and_move(src, skip_sample_check=False):
+def determine_dest_parent_path(src, results_path="/hpf/largeprojects/ccm_dccforge/dccforge/results/"):
+	proj = os.path.basename(src)
+	first_char = proj[0]
+	if first_char.isnumeric():
+		dest_dir = "0x" if len(proj) <= 2 else "%sx" % proj[:-2]
+	else:
+		dest_dir =  "%cx" % first_char.upper()
+	return os.path.join(results_path, dest_dir)
+
+def check_and_move(src, explicit_dest, skip_sample_check=False):
 
 	#Checks for sufficient space, old bcbio runs
 	#If there is an old bcbio run, check that the samples are a subset of the new bcbio run before moving
 	#If there is an old bcbio run, copy over reports and the old_vcfs folder is there is one
-
-	def determine_dest_parent_path(src):
-		results_path = "/hpf/largeprojects/ccm_dccforge/dccforge/results/"
-		proj = os.path.basename(real_src)
-		first_char = proj[0]
-		if first_char.isnumeric():
-			dest_dir = "0x" if len(proj) <= 2 else "%sx" % proj[:-2]
-		else:
-			dest_dir =  "%cx" % first_char.upper()
-		return os.path.join(results_path, dest_dir)
 	
 	def enough_space(src, dest):
 		def get_size(path):
@@ -173,7 +172,7 @@ def check_and_move(src, skip_sample_check=False):
     
 	real_src = os.path.realpath(src)
 	proj = os.path.basename(real_src)
-	dest_parent_path = determine_dest_parent_path(real_src)
+	dest_parent_path = determine_dest_parent_path(real_src) if not explicit_dest else explicit_dest
 	dest_dir = os.path.join(dest_parent_path, proj)
 
 	if not enough_space(real_src, dest_parent_path):
@@ -235,8 +234,9 @@ def check_and_move(src, skip_sample_check=False):
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser(description='Moves a cre/crg/crt-bcbio run to the HPC results directory')
-	parser.add_argument('-src', help='Source directory containing files from a finished bcbio run')
+	parser.add_argument('-src', required=True, help='Source directory containing files from a finished bcbio run')
+	parser.add_argument('-dest', type=str, help='Explicity move the src files into this directory, don\'t use the built in function to automatically determine this. E.g. /results/4x/')
 	parser.add_argument('--skip_sample_check', action='store_true', help='Override checks for an older bcbio run')
 	args = parser.parse_args()
 	
-	check_and_move(args.src, args.skip_sample_check)
+	check_and_move(args.src, args.dest, args.skip_sample_check)
