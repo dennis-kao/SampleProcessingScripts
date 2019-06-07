@@ -25,6 +25,7 @@ import os
 import argparse
 import shutil
 import subprocess
+import re
 from datetime import datetime
 
 def mkdir(dir_path, mode=0o775):
@@ -145,10 +146,17 @@ def move(src, dest, proj):
 def determine_dest_parent_path(src, results_path="/hpf/largeprojects/ccm_dccforge/dccforge/results/"):
 	proj = os.path.basename(src)
 	first_char = proj[0]
+	last_char = proj[-1]
+
+	if first_char.isnumeric() and last_char.isalpha():
+		#get the numeric substring
+		proj = re.split('[a-zA-Z]+', proj)[0]
+	
 	if first_char.isnumeric():
 		dest_dir = "0x" if len(proj) <= 2 else "%sx" % proj[:-2]
 	else:
 		dest_dir =  "%cx" % first_char.upper()
+
 	return os.path.join(results_path, dest_dir)
 
 def check_and_move(src, explicit_dest, skip_sample_check=False):
