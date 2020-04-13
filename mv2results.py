@@ -15,7 +15,7 @@
 #	3. Setting appropriate permissions across all moved files
 #	4. Prints path of input files to be deleted, path of moved bams and path of project directory
 #	5. Moves old bcbio run in to the appropriate monthly trash directory
-#	6. Copies over old reports from older bcbio runs
+#	6. Copies over old reports from older bcbio run
 
 #System/Shell requirements:
 #	df -b
@@ -43,6 +43,9 @@ def list_files(path, extension=""):
 	else:
 		return files
 
+def list_dirs(path):
+	return {f for f in os.listdir(path) if os.path.isdir(os.path.join(path, f))}
+
 def trash(project_dir):
 
 	#Moves a bcbio run to the appropriate "monthly" trash
@@ -56,83 +59,46 @@ def trash(project_dir):
 		exit(4)
 
 	if not os.path.exists(monthly_trash):
+		print("Making trash directory: %s" % (monthly_trash))
 		mkdir(monthly_trash)
 
 	shutil.move(project_dir, monthly_trash)
 
 	print('Sucessfully moved old %s to trash directory: %s' % (proj, monthly_trash))
 
-def safe_rm(path):
-	
-	# Deletes a directory such that the source of symlinks are not recursively removed
-
-	def find_symlinks(path):
-		symlinks = []
-
-		for dirpath, dirnames, filenames in os.walk(path):
-			for name in filenames:
-				file_path = os.path.join(dirpath, name)
-				if os.path.islink(file_path):
-					symlinks.append(file_path)
-
-			for name in dirnames:
-				dir_path = os.path.join(dirpath, name)
-				if os.path.islink(dir_path):
-					symlinks.append(dir_path)
-
-		return symlinks
-
-	symlinks = find_symlinks(path)
-
-	print('Delete these input files: ')
-
-	for link in symlinks:
-		print(os.path.abspath(link))
-		os.unlink(link)
-
-	shutil.rmtree(path)
-
-	print('Safely deleted %s and it\'s symlinks: ' % path)
-	for link in symlinks:
-		print(link)
-
-def print_excel_values(path):
-
+def print_bams(path):
 	bams = list_files(path, ".bam")
 
-	print('Enter these values in to the Excel sheet:')
-
-	for bam in bams:
-		print(path)
-	
-	for bam in bams:
-		full_bam_path = os.path.join(path, bam)
-		print(full_bam_path)
+	if bams:
+		print('Bams:', end='')
+		
+		for bam in bams:
+			print(os.path.join(path, bam))
 
 def move(src, dest, proj):
 
-	#Make the directory for the project. Move files, copy folders.
-	#Folders can only be copied and cannot be moved (from personal largeprojects directories to the largeprojects/ccm_dccforge/dccforge/results)
+	#Folders cannot be moved from personal largeprojects directories to the largeprojects/ccm_dccforge/dccforge/results
 	#This is due to a limitation in our HPC systems, it involves the way quotas are calculated
+	#recursive_move re-makes directory structure and moves files across
 
-	restricted_dirs = ["input", ]
+	def recursive_move(src, dest):
+		files = list_files(src)
+		dirs = list_dirs(src)
+
+		mkdir(dest)
+
+		for f in files:
+			src_subdir = os.path.join(src, f)
+			shutil.move(src_subdir, dest)
+
+		for f in dirs:
+			dest_subdir = os.path.join(dest, f)
+			src_subdir = os.path.join(src, f)
+			recursive_move(src_subdir, dest_subdir)
 
 	dest_dir = os.path.join(dest, proj)
-	mkdir(dest_dir)
 
-	#move src files/folders
-	files = list_files(src)
-	dirs = {f for f in os.listdir(src) if os.path.isdir(os.path.join(src, f))}
-
-	for f in files:
-		src_path = os.path.join(src, f)
-		shutil.move(src_path, dest_dir)
-	
-	for f in dirs:
-		if f not in restricted_dirs:
-			src_path = os.path.join(src, f)
-			new_dest_dir = os.path.join(dest_dir, f)
-			shutil.copytree(src_path, new_dest_dir)
+	recursive_move(src, dest_dir)
 
 	chmod_out = subprocess.check_output(['chmod', 'g+w', '-R', dest_dir]).decode('utf-8')
 	if chmod_out:
@@ -201,7 +167,7 @@ def check_and_move(src, explicit_dest, skip_sample_check=False):
 
 			if src_is_superset:
 				print("src vcf\'s and bam\'s are a superset of the existing project\'s. Attempting to store the old project's old_vcfs folder and reports.")
-			else:
+			elif skip_sample_check:
 				print('--skip_sample_check parameter applied and src vcf\'s and bam\'s are NOT a superset of the existing project\'s. I hope you know what you are doing!')
 
 			old_vcfs = os.path.join(dest_dir, "old_vcfs")
@@ -236,9 +202,9 @@ def check_and_move(src, explicit_dest, skip_sample_check=False):
 			exit(3)
 
 	move(real_src, dest_parent_path, proj)
-	safe_rm(real_src)
+	shutil.rmtree(real_src)
 
-	print_excel_values(dest_dir)
+	print_bams(dest_dir)
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser(description='Moves a cre/crg/crt-bcbio run to the HPC results directory')
